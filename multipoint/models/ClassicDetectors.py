@@ -24,11 +24,11 @@ class ClassicDetectors(nn.Module):
             self.config = self.default_config
 
         if self.config['method'] == 'SURF':
-            self.method = cv2.xfeatures2d.SURF_create(1500)
-            self.method_2 = cv2.xfeatures2d.SURF_create(300)
+            self.method = cv2.SURF_create(1500)
+            self.method_2 = cv2.SURF_create(300)
         elif self.config['method'] == 'SIFT':
-            self.method = cv2.xfeatures2d.SIFT_create(1000)
-            self.method_2 = cv2.xfeatures2d.SIFT_create(1500)
+            self.method = cv2.SIFT_create(1000)
+            self.method_2 = cv2.SIFT_create(1500)
         elif self.config['method'] == 'LGHD':
             self.method = LGHD(self.config['image_H'], self.config['image_W'])
             self.method_2 = LGHD(self.config['image_H'], self.config['image_W'])

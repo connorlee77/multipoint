@@ -37,7 +37,7 @@ def main():
     # check training device
     device = torch.device("cpu")
     if config['prediction']['allow_gpu']:
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
     print('Predicting on device: {}'.format(device))
 
     # dataset
@@ -207,11 +207,11 @@ def main():
                                 kp = torch.nonzero(kp)
 
                             keypoints = [cv2.KeyPoint(c[1], c[0], args.radius + 2) for c in kp.numpy().astype(np.float32)]
-                            out_optical = cv2.drawKeypoints(out_optical,
-                                                            keypoints,
-                                                            outImage=np.array([]),
-                                                            color=(0, 0, 255),
-                                                            flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+                            # out_optical = cv2.drawKeypoints(out_optical,
+                            #                                 keypoints,
+                            #                                 outImage=np.array([]),
+                            #                                 color=(0, 0, 255),
+                            #                                 flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
 
                             kp = data['thermal']['keypoints'][i].squeeze().cpu()
 
@@ -220,20 +220,22 @@ def main():
                                 kp = torch.nonzero(kp)
 
                             keypoints = [cv2.KeyPoint(c[1], c[0], args.radius + 2) for c in kp.numpy().astype(np.float32)]
-                            out_thermal = cv2.drawKeypoints(out_thermal,
-                                                            keypoints,
-                                                            outImage=np.array([]),
-                                                            color=(0, 0, 255),
-                                                            flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+                            # out_thermal = cv2.drawKeypoints(out_thermal,
+                            #                                 keypoints,
+                            #                                 outImage=np.array([]),
+                            #                                 color=(0, 0, 255),
+                            #                                 flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
 
                     # plot the raw image
-                    cv2.imshow(str(i) + ' image optical', out_optical)
-                    cv2.imshow(str(i) + ' prob optical', (prob_optical).numpy() * 0.9 / config['prediction']['detection_threshold'])
-                    cv2.imshow(str(i) + ' prob masked optical', (prob_optical * mask_optical).numpy() * 0.9 / config['prediction']['detection_threshold'])
-                    cv2.imshow(str(i) + ' image thermal', out_thermal)
-                    cv2.imshow(str(i) + ' prob thermal', (prob_thermal).numpy() * 0.9 / config['prediction']['detection_threshold'])
-                    cv2.imshow(str(i) + ' prob masked thermal', (prob_thermal * mask_thermal).numpy() * 0.9 / config['prediction']['detection_threshold'])
-
+                    write_dir = os.path.join('output_keypoints', os.path.basename(os.path.normpath(args.model_dir)))
+                    os.makedirs(write_dir, exist_ok=True)
+                    cv2.imwrite(os.path.join(write_dir, str(i) + '_image_A.png'), out_optical)
+                    # cv2.imshow(str(i) + '_prob_optical', (prob_optical).numpy() * 0.9 / config['prediction']['detection_threshold'])
+                    # cv2.imshow(str(i) + '_prob_masked_optical', (prob_optical * mask_optical).numpy() * 0.9 / config['prediction']['detection_threshold'])
+                    cv2.imwrite(os.path.join(write_dir, str(i) + '_image_B.png'), out_thermal)
+                    # cv2.imshow(str(i) + '_prob_thermal', (prob_thermal).numpy() * 0.9 / config['prediction']['detection_threshold'])
+                    # cv2.imshow(str(i) + '_prob_masked_thermal', (prob_thermal * mask_thermal).numpy() * 0.9 / config['prediction']['detection_threshold'])
+                    exit(0)
             else:
                 for i, (image, prob, mask) in enumerate(zip(data['image'], out['prob'], data['valid_mask'])):
                     image = image.squeeze().cpu()

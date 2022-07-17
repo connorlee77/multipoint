@@ -7,6 +7,7 @@ import random
 import time
 import torch
 import yaml
+import tqdm
 
 import multipoint.datasets as datasets
 import multipoint.models as models
@@ -45,7 +46,7 @@ def main():
     # check training device
     device = torch.device("cpu")
     if config['prediction']['allow_gpu']:
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
     print('Predicting on device: {}'.format(device))
 
     # dataset
@@ -66,12 +67,21 @@ def main():
     net.eval()
 
     with torch.no_grad():
+        write_dir = os.path.join('output_align_p02', os.path.basename(os.path.normpath(args.model_dir)))
+        os.makedirs(write_dir, exist_ok=True)
+        os.makedirs(os.path.join(write_dir, 'matches'), exist_ok=True)
+        os.makedirs(os.path.join(write_dir, 'image_pairs'), exist_ok=True)
+
         if args.evaluation:
             results = utils.compute_descriptor_metrics(net, loader_dataset, device, config['prediction'], args.threshold_keypoints, args.threshold_homography)
 
+            print(results['pts_dist'])
+            print('true skips: {}'.format(results['true_skip']))
+            print('false skips: {}'.format(results['false_skip']))
             print('NN-mAP: {}'.format(results['nn_map']))
             print('M-Score: {}'.format(results['m_score']))
             print('Homography Correctness: {}'.format(results['h_correctness']))
+            print()
 
             # also add the params to store them
             results['config'] = config
@@ -93,165 +103,179 @@ def main():
                 plt.plot(results['recall_optical'], results['precision_optical'], 'r')
                 plt.plot(results['recall_thermal'], results['precision_thermal'], 'g')
                 plt.legend(['optical', 'thermal'])
+                plt.savefig(os.path.join(write_dir, 'pr.png'))
 
                 plt.figure()
                 plt.title('Optical M-score')
                 plt.hist(results['m_score_optical'], 50)
+                plt.savefig(os.path.join(write_dir, 'm_optical.png'))
 
                 plt.figure()
                 plt.title('Thermal M-score')
                 plt.hist(results['m_score_thermal'], 50)
+                plt.savefig(os.path.join(write_dir, 'm_thermal.png'))
 
                 plt.figure()
                 plt.title('Warp point distance error')
                 plt.hist(results['pts_dist'], 50)
-
-                plt.show()
+                plt.savefig(os.path.join(write_dir, 'pts_dist.png'))
 
         # get the sample and move it to the right device
-        synchronize()
-        t_start = time.time()
-        data = dataset[args.index]
-        data = utils.data_to_device(data, device)
-        data = utils.data_unsqueeze(data, 0)
+        # synchronize()
 
-        synchronize()
-        t_1 = time.time()
-        # predict
-        out_optical = net(data['optical'])
-        out_thermal = net(data['thermal']) # could be optimized to move into one forward pass
-        synchronize()
-        t_2 = time.time()
+        indices = [args.index]
+        if args.index == -1:
+            indices = list(range(len(dataset)))
 
-        # compute the nms probablity
-        if config['prediction']['nms'] > 0:
-            out_optical['prob'] = utils.box_nms(out_optical['prob'] * data['optical']['valid_mask'],
-                                                config['prediction']['nms'],
-                                                config['prediction']['detection_threshold'],
-                                                keep_top_k=config['prediction']['topk'],
-                                                on_cpu=config['prediction']['cpu_nms'])
-            out_thermal['prob'] = utils.box_nms(out_thermal['prob'] * data['thermal']['valid_mask'],
-                                                config['prediction']['nms'],
-                                                config['prediction']['detection_threshold'],
-                                                keep_top_k=config['prediction']['topk'],
-                                                on_cpu=config['prediction']['cpu_nms'])
+        for idx in tqdm.tqdm(indices[::10]):
+            t_start = time.time()
+            data = dataset[idx]
+            data = utils.data_to_device(data, device)
+            data = utils.data_unsqueeze(data, 0)
 
-        synchronize()
-        t_3 = time.time()
-        print('Loading the data took: {} s'.format(t_1 - t_start))
-        print('Two forward passes took: {} s'.format(t_2 - t_1))
-        print('Box nms: {} s'.format(t_3 - t_2))
+            # synchronize()
+            t_1 = time.time()
+            # predict
+            out_optical = net(data['optical'])
+            out_thermal = net(data['thermal']) # could be optimized to move into one forward pass
+            # synchronize()
+            t_2 = time.time()
 
-        # display a sample
-        if args.plot:
-            # add homography to data if not available
-            if 'homography' not in data['optical'].keys():
-                data['optical']['homography'] =  torch.eye(3, dtype=torch.float32).to(device).view(data['optical']['image'].shape[0],3,3)
+            # compute the nms probablity
+            if config['prediction']['nms'] > 0:
+                out_optical['prob'] = utils.box_nms(out_optical['prob'] * data['optical']['valid_mask'],
+                                                    config['prediction']['nms'],
+                                                    config['prediction']['detection_threshold'],
+                                                    keep_top_k=config['prediction']['topk'],
+                                                    on_cpu=config['prediction']['cpu_nms'])
+                out_thermal['prob'] = utils.box_nms(out_thermal['prob'] * data['thermal']['valid_mask'],
+                                                    config['prediction']['nms'],
+                                                    config['prediction']['detection_threshold'],
+                                                    keep_top_k=config['prediction']['topk'],
+                                                    on_cpu=config['prediction']['cpu_nms'])
 
-            if 'homography' not in data['thermal'].keys():
-                data['thermal']['homography'] =  torch.eye(3, dtype=torch.float32).to(device).view(data['optical']['image'].shape[0],3,3)
+            # synchronize()
+            t_3 = time.time()
 
-            for i, (optical, thermal,
-                    prob_optical, prob_thermal,
-                    mask_optical, mask_thermal,
-                    H_optical, H_thermal,
-                    desc_optical, desc_thermal) in enumerate(zip(data['optical']['image'],
-                                                                 data['thermal']['image'],
-                                                                 out_optical['prob'],
-                                                                 out_thermal['prob'],
-                                                                 data['optical']['valid_mask'],
-                                                                 data['thermal']['valid_mask'],
-                                                                 data['optical']['homography'],
-                                                                 data['thermal']['homography'],
-                                                                 out_optical['desc'],
-                                                                 out_thermal['desc'],)):
+            if args.index != -1:
+                print('Loading the data took: {} s'.format(t_1 - t_start))
+                print('Two forward passes took: {} s'.format(t_2 - t_1))
+                print('Box nms: {} s'.format(t_3 - t_2))
 
-                # get the keypoints
-                pred_optical = torch.nonzero((prob_optical.squeeze() > config['prediction']['detection_threshold']).float())
-                pred_thermal = torch.nonzero((prob_thermal.squeeze() > config['prediction']['detection_threshold']).float())
-                kp_optical = [cv2.KeyPoint(c[1], c[0], args.radius) for c in pred_optical.cpu().numpy().astype(np.float32)]
-                kp_thermal = [cv2.KeyPoint(c[1], c[0], args.radius) for c in pred_thermal.cpu().numpy().astype(np.float32)]
+            # display a sample
+            if args.plot:
+                # add homography to data if not available
+                if 'homography' not in data['optical'].keys():
+                    data['optical']['homography'] =  torch.eye(3, dtype=torch.float32).to(device).view(data['optical']['image'].shape[0],3,3)
 
-                # get the descriptors
-                if desc_optical.shape[1:] == prob_optical.shape[1:]:
-                    # classic descriptors, directly take values
-                    desc_optical_sampled = desc_optical[:, pred_optical[:,0], pred_optical[:,1]].transpose(0,1)
-                    desc_thermal_sampled = desc_thermal[:, pred_thermal[:,0], pred_thermal[:,1]].transpose(0,1)
-                else:
-                    H, W = data['optical']['image'].shape[2:]
-                    desc_optical_sampled = utils.interpolate_descriptors(pred_optical, desc_optical, H, W)
-                    desc_thermal_sampled = utils.interpolate_descriptors(pred_thermal, desc_thermal, H, W)
+                if 'homography' not in data['thermal'].keys():
+                    data['thermal']['homography'] =  torch.eye(3, dtype=torch.float32).to(device).view(data['optical']['image'].shape[0],3,3)
 
-                # match the keypoints
-                matches = utils.get_matches(desc_optical_sampled.cpu().numpy(),
-                                            desc_thermal_sampled.cpu().numpy(),
-                                            config['prediction']['matching']['method'],
-                                            config['prediction']['matching']['knn_matches'],
-                                            **config['prediction']['matching']['method_kwargs'])
+                for i, (optical, thermal,
+                        prob_optical, prob_thermal,
+                        mask_optical, mask_thermal,
+                        H_optical, H_thermal,
+                        desc_optical, desc_thermal) in enumerate(zip(data['optical']['image'],
+                                                                    data['thermal']['image'],
+                                                                    out_optical['prob'],
+                                                                    out_thermal['prob'],
+                                                                    data['optical']['valid_mask'],
+                                                                    data['thermal']['valid_mask'],
+                                                                    data['optical']['homography'],
+                                                                    data['thermal']['homography'],
+                                                                    out_optical['desc'],
+                                                                    out_thermal['desc'],)):
 
-                # mask the image if requested
-                optical *= mask_optical
-                thermal *= mask_thermal 
+                    # mask the image if requested
+                    # optical *= mask_optical
+                    # thermal *= mask_thermal 
 
-                # convert images to numpy arrays
-                im_optical = cv2.cvtColor((np.clip(optical.squeeze().cpu().numpy(), 0.0, 1.0) * 255.0).astype(np.uint8),cv2.COLOR_GRAY2RGB)
-                im_thermal = cv2.cvtColor((np.clip(thermal.squeeze().cpu().numpy(), 0.0, 1.0) * 255.0).astype(np.uint8),cv2.COLOR_GRAY2RGB)
+                    # convert images to numpy arrays
+                    im_optical = cv2.cvtColor((np.clip(optical.squeeze().cpu().numpy(), 0.0, 1.0) * 255.0).astype(np.uint8),cv2.COLOR_GRAY2RGB)
+                    im_thermal = cv2.cvtColor((np.clip(thermal.squeeze().cpu().numpy(), 0.0, 1.0) * 255.0).astype(np.uint8),cv2.COLOR_GRAY2RGB)
+
+                    cv2.imwrite(os.path.join(write_dir, 'image_pairs', '{}.png'.format(data['name'])), np.hstack([im_optical, im_thermal]))
+
+                    # get the keypoints
+                    pred_optical = torch.nonzero((prob_optical.squeeze() > config['prediction']['detection_threshold']).float())
+                    pred_thermal = torch.nonzero((prob_thermal.squeeze() > config['prediction']['detection_threshold']).float())
+                    kp_optical = [cv2.KeyPoint(c[1], c[0], args.radius) for c in pred_optical.cpu().numpy().astype(np.float32)]
+                    kp_thermal = [cv2.KeyPoint(c[1], c[0], args.radius) for c in pred_thermal.cpu().numpy().astype(np.float32)]
+
+                    # get the descriptors
+                    if desc_optical.shape[1:] == prob_optical.shape[1:]:
+                        # classic descriptors, directly take values
+                        desc_optical_sampled = desc_optical[:, pred_optical[:,0], pred_optical[:,1]].transpose(0,1)
+                        desc_thermal_sampled = desc_thermal[:, pred_thermal[:,0], pred_thermal[:,1]].transpose(0,1)
+                    else:
+                        H, W = data['optical']['image'].shape[2:]
+                        desc_optical_sampled = utils.interpolate_descriptors(pred_optical, desc_optical, H, W)
+                        desc_thermal_sampled = utils.interpolate_descriptors(pred_thermal, desc_thermal, H, W)
+
+                    # match the keypoints
+                    desc1 = desc_optical_sampled.cpu().numpy()
+                    desc2 = desc_thermal_sampled.cpu().numpy()
+                    matches = []
+                    if desc1.shape[0] > 0 and desc2.shape[0] > 0:
+                        matches = utils.get_matches(desc1,
+                                                    desc2,
+                                                    config['prediction']['matching']['method'],
+                                                    config['prediction']['matching']['knn_matches'],
+                                                    **config['prediction']['matching']['method_kwargs'])
+
+                    # draw the matches
+                    out_image = cv2.drawMatches(im_optical, kp_optical, im_thermal, kp_thermal, matches, None, flags=0)
+                    cv2.imwrite(os.path.join(write_dir, 'matches', '{}_matches.png'.format(data['name'])), out_image)
+
+                    # align images to estimate homography and get good matches
+                    optical_pts = np.float32([kp_optical[m.queryIdx].pt for m in matches]).reshape(-1,1,2)
+                    thermal_pts = np.float32([kp_thermal[m.trainIdx].pt for m in matches]).reshape(-1,1,2)
+
+                    if optical_pts.shape[0] < 4 or thermal_pts.shape[0] < 4:
+                        H_est = np.eye(3,3)
+                        matchesMask = []
+                    else:
+                        H_est, mask = cv2.findHomography(optical_pts, thermal_pts, cv2.RANSAC, ransacReprojThreshold=config['prediction']['reprojection_threshold'])
+                        matchesMask = mask.ravel().tolist()
+
+                    if H_est is None:
+                        H_est = np.eye(3,3)
+                        matchesMask = []
+
+                    # warped_image = cv2.warpPerspective(im_optical, H_est, im_optical.shape[:2][::-1], borderMode=cv2.BORDER_CONSTANT)
+                    # cv2.imwrite(os.path.join(write_dir, 'warped_optical.png'), warped_image)
+
+                    # correct matches mask
+                    # H_gt = np.matmul(H_thermal.cpu().numpy(), np.linalg.inv(H_optical.cpu().numpy()))
+                    # warped_optical = utils.warp_keypoints(optical_pts.squeeze()[:,::-1], H_gt)[:,::-1]
+                    # diff = thermal_pts.squeeze() - warped_optical
+                    # diff = np.linalg.norm(diff, axis=1)
+                    # correctMatchesMask = (diff < 4.0).astype(int).tolist()
+
+                    # draw refined matches
+                    out_image_refined = cv2.drawMatches(im_optical,
+                                                        kp_optical,
+                                                        im_thermal,
+                                                        kp_thermal,
+                                                        matches, 
+                                                        None,
+                                                        matchColor=(0, 255, 0),
+                                                        singlePointColor=(0, 0, 255),
+                                                        matchesMask=matchesMask, 
+                                                        flags=0)
 
 
+                    cv2.imwrite(os.path.join(write_dir, 'matches', '{}_matches_refined.png'.format(data['name'])), out_image_refined)
 
-                # draw the matches
-                out_image = cv2.drawMatches(im_optical, kp_optical, im_thermal, kp_thermal, matches, None, flags=2)
-                cv2.namedWindow('matches', cv2.WINDOW_NORMAL)
-                cv2.resizeWindow('matches', (out_image.shape[1]*2, out_image.shape[0]*2 + 50))
-                cv2.imshow('matches', out_image)
+                    if args.index != -1:
+                        # compare estimated and computed homography
+                        print('--------------------------------------------------------')
+                        print('Estimated Homography:')
+                        print(H_est)
+                        print('Ground Truth Homography:')
+                        print(np.matmul(H_thermal.cpu().numpy(), np.linalg.inv(H_optical.cpu().numpy())))
+                        print('--------------------------------------------------------')
 
-                # align images to estimate homography and get good matches
-                optical_pts = np.float32([kp_optical[m.queryIdx].pt for m in matches]).reshape(-1,1,2)
-                thermal_pts = np.float32([kp_thermal[m.trainIdx].pt for m in matches]).reshape(-1,1,2)
-
-                if optical_pts.shape[0] < 4 or thermal_pts.shape[0] < 4:
-                    H_est = np.eye(3,3)
-                    matchesMask = []
-                else:
-                    H_est, mask = cv2.findHomography(optical_pts, thermal_pts, cv2.RANSAC, ransacReprojThreshold=config['prediction']['reprojection_threshold'])
-                    matchesMask = mask.ravel().tolist()
-
-                warped_image = cv2.warpPerspective(im_optical, H_est, im_optical.shape[:2][::-1], borderMode=cv2.BORDER_CONSTANT)
-                cv2.imshow('warped optical', warped_image)
-
-
-                # correct matches mask
-                H_gt = np.matmul(H_thermal.cpu().numpy(), np.linalg.inv(H_optical.cpu().numpy()))
-                warped_optical = utils.warp_keypoints(optical_pts.squeeze()[:,::-1], H_gt)[:,::-1]
-                diff = thermal_pts.squeeze() - warped_optical
-                diff = np.linalg.norm(diff, axis=1)
-                matchesMask = (diff < 4.0).tolist()
-
-                # draw refined matches
-                out_image_refined = cv2.drawMatches(im_optical,
-                                                    kp_optical,
-                                                    im_thermal,
-                                                    kp_thermal,
-                                                    matches, 
-                                                    None,
-                                                    matchColor=(0, 255, 0),
-                                                    singlePointColor=(0, 0, 255),
-                                                    flags=0,
-                                                    matchesMask = matchesMask)
-
-                cv2.namedWindow('matches_refined', cv2.WINDOW_NORMAL)
-                cv2.resizeWindow('matches_refined', (out_image_refined.shape[1]*2, out_image_refined.shape[0]*2 + 50))
-                cv2.imshow('matches_refined', out_image_refined)
-
-                # compare estimated and computed homography
-                print('--------------------------------------------------------')
-                print('Estimated Homography:')
-                print(H_est)
-                print('Ground Truth Homography:')
-                print(np.matmul(H_thermal.cpu().numpy(), np.linalg.inv(H_optical.cpu().numpy())))
-                print('--------------------------------------------------------')
-
-            cv2.waitKey(0)
 
 if __name__ == "__main__":
     main()

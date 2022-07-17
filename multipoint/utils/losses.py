@@ -90,6 +90,10 @@ class SuperPointLoss(Module):
 
         # convert the valid mask to mask the bins instead of pixels
         # if any pixel in the bin is invalid the bin is invalid
+
+        # # Don't set valid mask for detector loss
+        valid_mask = None
+
         valid_mask = torch.ones_like(keypoint_map).bool().unsqueeze(1).to(labels.device) if valid_mask is None else valid_mask
         valid_mask = space_to_depth(valid_mask, 8)
         valid_mask = torch.prod(valid_mask, 1)
@@ -118,7 +122,6 @@ class SuperPointLoss(Module):
             loss = torch.nn.functional.binary_cross_entropy(torch.nn.functional.softmax(logits, dim=1), labels, reduction='none').sum(1)
 
         loss *= valid_mask
-
         return (loss.sum(-1).sum(-1) / valid_mask.sum(-1).sum(-1)).mean()
 
     def descriptor_loss(self, descriptor1, descriptor2, homography1, homography2, valid_mask1 = None, valid_mask2 = None):
@@ -261,7 +264,7 @@ class SuperPointLoss(Module):
                 loss *= valid_mask
                 positive_dist *= valid_mask
                 negative_dist *= valid_mask
-                normalization = valid_mask.sum(-1).sum(-1).sum(-1).sum(-1)
+                normalization = torch.clamp(valid_mask.view(batch_size, -1).sum(dim=1), 1)
             else:
                 normalization = Hc * Wc *  Hc * Wc
 

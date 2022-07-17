@@ -9,6 +9,8 @@
 *lsf*
 *.txt
 data/*
+model_weights/*
+**/*.png
 
 !requirements.txt
 !.gitignore

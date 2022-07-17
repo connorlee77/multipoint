@@ -1,10 +1,12 @@
 dataset:
-    type: 'ImagePairDataset'
+    type: 'SeasonPairDataset'
     filename: data/training.hdf5
     keypoints_filename: data/labels_training.hdf5
+    dataset_dir: /home/fremont/users/connor_lee/landmarks-project/data/connecticut/tiles-600-1.0/train/
+    keypoint_dir: /home/fremont/users/connor_lee/landmarks-project/outputs/superpoint-gt/connecticut-600-1.0-r1-v2/train/superpoint_gt
     single_image: false
     random_pairs: true
-    height: 240
+    height: 320
     width: 320
     augmentation:
         photometric:
@@ -37,12 +39,20 @@ dataset:
                 translation_overflow: 0.05
             valid_border_margin: 0
             border_reflect: true
+    mask:
+        enable: true
+        use_as_valid_mask: false
+        id_mask_dir: /home/fremont/users/connor_lee/landmarks-project/outputs/landmark-masks/connecticut-train/resnet18-f1234-connecticut-v2
+        percentile_map_path: /home/fremont/users/connor_lee/landmarks-project/outputs/landmark-masks/connecticut-train/resnet18-f1234-connecticut-v2/percentiles.csv
+        feature_layer: 2
+        percentile: 70
+
 
 model:
     type: 'MultiPoint'
     multispectral: false
     descriptor_head: true
-    descriptor_size: 64
+    descriptor_size: 256
     intepolation_mode: bilinear
     normalize_descriptors: true
     final_batchnorm: true
@@ -67,11 +77,20 @@ training:
     n_epochs: 3000
     learningrate: 1e-4
     batchsize: 32
-    num_worker: 4
+    num_worker: 8
     allow_gpu: true
     use_writer: true
-    output_directory: 'model_weights/multipoint-retrained'
+    output_directory: 'model_weights/seasonal_multipoint_id_mask_256'
     save_every_n_epoch: 5
     validation:
-        compute_validation_loss: false
-
+        compute_validation_loss: true
+        every_nth_epoch: 1
+        dataset_dir: /home/fremont/users/connor_lee/landmarks-project/data/connecticut/tiles-600-1.0/val/
+        keypoint_dir: /home/fremont/users/connor_lee/landmarks-project/outputs/superpoint-gt/connecticut-600-1.0-r1-v2/val/superpoint_gt
+        mask:
+            enable: true
+            use_as_valid_mask: false
+            id_mask_dir: /home/fremont/users/connor_lee/landmarks-project/outputs/landmark-masks/connecticut-val/resnet18-f1234-connecticut-v2
+            percentile_map_path: /home/fremont/users/connor_lee/landmarks-project/outputs/landmark-masks/connecticut-train/resnet18-f1234-connecticut-v2/percentiles.csv
+            feature_layer: 2
+            percentile: 70

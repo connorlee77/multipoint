@@ -16,6 +16,7 @@ def main():
     parser = argparse.ArgumentParser(description='Train a network')
     parser.add_argument('-y', '--yaml-config', required=True, help='YAML config file')
     parser.add_argument('-w', '--weight-file', help='File containing the weights to initialize the weights')
+    parser.add_argument('-d', '--device', type=int, default=0)
     args = parser.parse_args()
 
     with open(args.yaml_config, 'r') as f:
@@ -32,7 +33,7 @@ def main():
     # check training device
     device = torch.device("cpu")
     if config['training']['allow_gpu']:
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        device = torch.device("cuda:{}".format(args.device) if torch.cuda.is_available() else "cpu")
     print('Training on device: {}'.format(device))
 
     # dataset
@@ -43,8 +44,10 @@ def main():
 
     if config['training']['validation']['compute_validation_loss']:
         val_config = copy.copy(config['dataset'])
-        val_config['filename'] = config['training']['validation']['filename']
-        val_config['keypoints_filename'] = config['training']['validation']['keypoints']
+        val_config['dataset_dir'] = config['training']['validation']['dataset_dir']
+        val_config['keypoint_dir'] = config['training']['validation']['keypoint_dir']
+        val_config['mask'] = config['training']['validation']['mask']
+
         validation_dataset = dataset_class(val_config)
         loader_validationset = torch.utils.data.DataLoader(validation_dataset, batch_size=config['training']['batchsize'],
                                                            shuffle=False, num_workers=config['training']['num_worker'])
@@ -62,9 +65,9 @@ def main():
         weights = utils.fix_model_weigth_keys(weights)
         net.load_state_dict(weights)
 
-    if config['training']['allow_gpu'] and (torch.cuda.device_count() > 1):
-        print("Using ", torch.cuda.device_count(), " GPUs to train the model")
-        net = torch.nn.DataParallel(net)
+    # if config['training']['allow_gpu'] and (torch.cuda.device_count() > 1):
+    #     print("Using ", torch.cuda.device_count(), " GPUs to train the model")
+    #     net = torch.nn.DataParallel(net)
 
     net.to(device)
 

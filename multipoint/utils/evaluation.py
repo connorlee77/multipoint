@@ -153,6 +153,7 @@ def compute_repeatability_multispectral(net, dataloader, device, config,
                                       H_optical.split(1),
                                       H_thermal.split(1)):
 
+            # print(mask_o.sum(), mask_t.sum())
             # get keypoints
             kp_optical = torch.nonzero((prob_o.squeeze() > detection_threshold).float() * mask_o.squeeze())
             kp_thermal = torch.nonzero((prob_t.squeeze() > detection_threshold).float() * mask_t.squeeze())
@@ -221,6 +222,8 @@ def compute_descriptor_metrics(net, dataloader, device, config, threshold_keypoi
     m_score_thermal = []
     pts_dist = []
 
+    true_skip = 0
+    false_skip = 0
     for data in tqdm(dataloader):
         # predict
         data = data_to_device(data, device)
@@ -346,6 +349,10 @@ def compute_descriptor_metrics(net, dataloader, device, config, threshold_keypoi
                 H_est = None
                 matchesMask = []
             else:
+                # H_est, mask = cv2.estimateAffinePartial2D(optical_pts, thermal_pts, cv2.RANSAC, ransacReprojThreshold=config['reprojection_threshold'])
+                # H_temp = np.eye(3)
+                # H_temp[0:2,:] = H_est
+                # H_est = H_temp
                 H_est, mask = cv2.findHomography(optical_pts, thermal_pts, cv2.RANSAC, ransacReprojThreshold=config['reprojection_threshold'])
 
             # compute the homography correctness
@@ -355,7 +362,11 @@ def compute_descriptor_metrics(net, dataloader, device, config, threshold_keypoi
                 pts_warped_est = warp_keypoints(pts, H_est, np.float)
                 pts_dist.append(np.linalg.norm(pts_warped_est - pts_warped_gt, axis=1).sum()/4)
             else:
-                pts_dist.append(999.0)
+                if not data['has_viable_matching_regions']:
+                    true_skip += 1
+                else:
+                    false_skip += 1
+                    pts_dist.append(999.0)
 
     # convert to numpy arrays
     tp_optical = np.array(tp_optical)
@@ -432,6 +443,8 @@ def compute_descriptor_metrics(net, dataloader, device, config, threshold_keypoi
         'pts_dist': pts_dist,
         'average_h_error': average_h_error,
         'h_correctness': h_correctness,
+        'true_skip': true_skip,
+        'false_skip': false_skip,
         }
 
     return out
