@@ -52,9 +52,16 @@ class ClassicDetectors(nn.Module):
 
         # convert image and get detections and descriptors
         image_np = (data['image'].squeeze().cpu().numpy() * 255.0).astype(np.uint8)
-
+        
         keypoints, descriptors = self.method.detectAndCompute(image_np,None)
+        # out_optical = cv2.drawKeypoints(image_np,
+        #         keypoints,
+        #         outImage=np.array([]),
+        #         color=(0, 255, 0),
+        #         flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
 
+        # cv2.imwrite('image.png', out_optical)
+        # exit(0)
         if len(keypoints) < self.config['min_keypoints']:
             keypoints, descriptors = self.method_2.detectAndCompute(image_np,None)
 

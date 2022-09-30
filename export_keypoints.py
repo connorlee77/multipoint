@@ -13,7 +13,7 @@ def main():
     parser = argparse.ArgumentParser(description='Script to export the keypoints for images in a dataset using a base detector')
     parser.add_argument('-y', '--yaml-config', default='configs/config_export_keypoints.yaml', help='YAML config file')
     parser.add_argument('-o', '--output_file', required=True, help='Output file name')
-    parser.add_argument('-m', '--model-dir', default='model_weights/surf', help='Directory of the model')
+    parser.add_argument('-m', '--model-dir', default='model_weights/sift', help='Directory of the model')
     parser.add_argument('-v', '--version', default='none', help='Model version (name of the .model file)')
     parser.add_argument('-snms', '--single-nms', action='store_true', help='Do the nms calculation for each sample separately')
     parser.add_argument('-skip', dest='skip_processed', action='store_true', help='Skip already processed samples')
@@ -28,7 +28,7 @@ def main():
         config['model'] = yaml.load(f, Loader=yaml.FullLoader)['model']
 
     # create output file
-    output_file = h5py.File(args.output_file)
+    output_file = h5py.File(args.output_file, 'w')
 
     # check device
     device = torch.device("cpu")
@@ -101,6 +101,8 @@ def main():
                     # save the data
                     output_file.create_group(name)
                     output_file[name].create_dataset('keypoints', data=pred.cpu().numpy())
+
+                    print(pred.cpu().numpy().shape)
 
     output_file.close()
 

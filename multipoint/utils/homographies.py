@@ -4,7 +4,7 @@ import numpy as np
 import torch
 try:
     import kornia
-    from kornia.geometry.warp.homography_warper import homography_warp
+    from kornia.geometry import homography_warp
     kornia_available = True
 except:
     kornia_available = False
@@ -421,8 +421,8 @@ def warp_perspective_tensor(src, M, dsize, mode='bilinear', padding_mode='zeros'
         raise ValueError("Input M must be a Bx3x3 tensor. Got {}"
                          .format(src.shape))
     # launches the warper
-    M_norm = kornia.geometry.transform.imgwarp.dst_norm_to_dst_norm(M, (src.shape[-2:]), dsize)
-    return homography_warp(src, torch.inverse(M_norm), dsize, mode, padding_mode)
+    # M_norm = kornia.geometry.transform.imgwarp.dst_norm_to_dst_norm(M, (src.shape[-2:]), dsize)
+    return homography_warp(src, torch.inverse(M), dsize, mode, padding_mode)
 
 class WarpingModule(nn.Module):
     def __init__(self):
